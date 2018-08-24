@@ -1,198 +1,285 @@
-import { _ } from 'meteor/underscore';
-import { OHIF } from 'meteor/ohif:core';
+import _ from 'lodash';
+import net from 'net';
+import util from 'util';
+import { EventEmitter } from 'events';
+import { default as CSocket } from './CSocket.js';
+import { default as constant } from './constants.js';
+import { default as PDU } from './PDU.js';
+import { default as DicomMessage } from './Message.js';
 
-// Uses NodeJS 'net'
-// https://nodejs.org/api/net.html
-const net = Npm.require('net');
 const Socket = net.Socket;
 
-Connection = function (options) {
-  EventEmitter.call(this);
-  this.options = Object.assign({
-    maxPackageSize: C.DEFAULT_MAX_PACKAGE_SIZE,
-    idle: false,
-    reconnect: true,
-    vr: {
-      split: true
-    }
-  }, options);
-
-  this.reset();
-};
-
-util.inherits(Connection, EventEmitter);
-
-const StoreHandle = function () {
-  EventEmitter.call(this);
-};
-
-util.inherits(StoreHandle, EventEmitter);
-
-Connection.prototype.reset = function () {
-  this.defaultPeer = null;
-  this.defaultServer = null;
-
-  _.each(this.peers, (peerInfo) => {
-    _.each(peerInfo.sockets, (socket) => socket.emit('close'));
-  });
-
-  this.peers = {};
-};
-
-Connection.prototype.addPeer = function (options) {
-  if (!options.aeTitle || !options.host || !options.port) {
-    return false;
-  }
-
-  const peer = {
-    host: options.host,
-    port: options.port,
-    sockets: {}
-  };
-
-  this.peers[options.aeTitle] = peer;
-  if (options.default) {
-    if (options.server) {
-      this.defaultServer = options.aeTitle;
-    } else {
-      this.defaultPeer = options.aeTitle;
-    }
-  }
-
-  if (options.server) {
-    // Start listening
-    peer.server = net.createServer();
-    peer.server.listen(options.port, options.host, function () {
-      OHIF.log.info('listening on', this.address());
-    });
-    peer.server.on('error', function (err) {
-      OHIF.log.info('server error', err);
-    });
-    peer.server.on('connection', (nativeSocket) => {
-      // Incoming connections
-      const socket = new CSocket(nativeSocket, this.options);
-
-      this.addSocket(options.aeTitle, socket);
-
-      // Close server on close socket
-      socket.on('close', function () {
-        peer.server.close();
-      });
-    });
-  }
-};
-
-Connection.prototype.selectPeer = function (aeTitle) {
-  if (!aeTitle || !this.peers[aeTitle]) {
-    throw 'No such peer';
-  }
-
-  return this.peers[aeTitle];
-};
-
-Connection.prototype._sendFile = function (socket, sHandle, file, maxSend, metaLength, list) {
-  const fileNameText = typeof file.file === 'string' ? file.file : 'buffer';
-
-  OHIF.log.info(`Sending file ${fileNameText}`);
-  const useContext = socket.getContextByUID(file.context);
-  const self = this;
-
-  PDU.generatePDatas(useContext.id, file.file, maxSend, null, metaLength, function (err, handle) {
-    if (err) {
-      OHIF.log.info('Error while sending file');
-
-      return;
-    }
-
-    const processNext = function () {
-      const next = list.shift();
-
-      if (next) {
-        self._sendFile(socket, sHandle, next, maxSend, metaLength, list);
-      } else {
-        socket.release();
+class Connection {
+  constructor (options) {
+    EventEmitter.call(this);
+    this.options = Object.assign({
+      maxPackageSize: constant.DEFAULT_MAX_PACKAGE_SIZE,
+      idle: false,
+      reconnect: true,
+      vr: {
+        split: true
       }
+    }, options);
+
+    this.reset();
+  }
+
+  reset () {
+    this.defaultPeer = null;
+    this.defaultServer = null;
+
+    _.each(this.peers, (peerInfo) => {
+      _.each(peerInfo.sockets, (socket) => socket.emit('close'));
+    });
+
+    this.peers = {};
+  }
+
+  addPeer (options) {
+    if (!options.aeTitle || !options.host || !options.port) {
+      return false;
+    }
+
+    const peer = {
+      host: options.host,
+      port: options.port,
+      sockets: {}
     };
 
-    const store = socket.storeInstance(useContext.abstractSyntax, file.uid);
-
-    handle.on('pdv', function (pdv) {
-      socket.sendPData(pdv);
-    });
-    handle.on('error', function (err) {
-      sHandle.emit('file', err, fileNameText);
-      processNext();
-    });
-    store.on('response', function (msg) {
-      const statusText = msg.getStatus().toString(16);
-
-      OHIF.log.info('STORE reponse with status', statusText);
-      let error = null;
-
-      if (msg.failure()) {
-        error = new Error(statusText);
+    this.peers[options.aeTitle] = peer;
+    if (options.default) {
+      if (options.server) {
+        this.defaultServer = options.aeTitle;
+      } else {
+        this.defaultPeer = options.aeTitle;
       }
+    }
 
-      sHandle.emit('file', error, fileNameText);
-      processNext();
-    });
-  });
-};
+    if (options.server) {
+    // Start listening
+      peer.server = net.createServer();
+      peer.server.listen(options.port, options.host, () => {
+        console.info('listening on', this.address());
+      });
+      peer.server.on('error', (err) => {
+        console.info('server error', err);
+      });
+      peer.server.on('connection', (nativeSocket) => {
+      // Incoming connections
+        const socket = new CSocket(nativeSocket, this.options);
 
-Connection.prototype.storeInstances = function (fileList) {
-  const contexts = {};
-  let read = 0;
-  const length = fileList.length;
-  const toSend = [];
-  const self = this;
-  const handle = new StoreHandle();
-  let lastProcessedMetaLength;
+        this.addSocket(options.aeTitle, socket);
 
-  fileList.forEach(function (bufferOrFile) {
-    const fileNameText = typeof bufferOrFile === 'string' ? bufferOrFile : 'buffer';
+        // Close server on close socket
+        socket.on('close', function () {
+          peer.server.close();
+        });
+      });
+    }
+  }
 
-    DicomMessage.readMetaHeader(bufferOrFile, function (err, metaMessage, metaLength) {
-      read++;
+  selectPeer (aeTitle) {
+    if (!aeTitle || !this.peers[aeTitle]) {
+      throw new Error('No such peer');
+    }
+
+    return this.peers[aeTitle];
+  }
+
+  _sendFile (socket, sHandle, file, maxSend, metaLength, list) {
+    const fileNameText = typeof file.file === 'string' ? file.file : 'buffer';
+    const self = this;
+
+    console.info(`Sending file ${fileNameText}`);
+    const useContext = socket.getContextByUID(file.context);
+
+    PDU.generatePDatas(useContext.id, file.file, maxSend, null, metaLength, (err, handle) => {
       if (err) {
-        handle.emit('file', err, fileNameText);
-        if (read === length && toSend.length > 0 && lastProcessedMetaLength) {
-          sendProcessedFiles(self, contexts, toSend, handle, lastProcessedMetaLength);
-        }
+        console.info('Error while sending file');
 
         return;
       }
 
-      OHIF.log.info(`Dicom file ${(typeof bufferOrFile === 'string' ? bufferOrFile : 'buffer')} found`);
-      lastProcessedMetaLength = metaLength;
-      const syntax = metaMessage.getValue(0x00020010);
-      const sopClassUID = metaMessage.getValue(0x00020002);
-      const instanceUID = metaMessage.getValue(0x00020003);
+      const processNext = () => {
+        const next = list.shift();
 
-      if (!contexts[sopClassUID]) {
-        contexts[sopClassUID] = [];
-      }
+        if (next) {
+          self._sendFile(socket, sHandle, next, maxSend, metaLength, list);
+        } else {
+          socket.release();
+        }
+      };
 
-      if (syntax && contexts[sopClassUID].indexOf(syntax) === -1) {
-        contexts[sopClassUID].push(syntax);
-      }
+      const store = socket.storeInstance(useContext.abstractSyntax, file.uid);
 
-      toSend.push({
-        file: bufferOrFile,
-        context: sopClassUID,
-        uid: instanceUID
+      handle.on('pdv', (pdv) => {
+        socket.sendPData(pdv);
       });
+      handle.on('error', (err) => {
+        sHandle.emit('file', err, fileNameText);
+        processNext();
+      });
+      store.on('response', (msg) => {
+        const statusText = msg.getStatus().toString(16);
 
-      if (read === length) {
-        sendProcessedFiles(self, contexts, toSend, handle, metaLength);
+        console.info('STORE reponse with status', statusText);
+        let error = null;
+
+        if (msg.failure()) {
+          error = new Error(statusText);
+        }
+
+        sHandle.emit('file', error, fileNameText);
+        processNext();
+      });
+    });
+  }
+
+  storeInstances (fileList) {
+    const contexts = {};
+    let read = 0;
+    const length = fileList.length;
+    const toSend = [];
+    const self = this;
+    const handle = new StoreHandle();
+    let lastProcessedMetaLength;
+
+    fileList.forEach((bufferOrFile) => {
+      const fileNameText = typeof bufferOrFile === 'string' ? bufferOrFile : 'buffer';
+
+      DicomMessage.readMetaHeader(bufferOrFile, (err, metaMessage, metaLength) => {
+        read++;
+        if (err) {
+          handle.emit('file', err, fileNameText);
+          if (read === length && toSend.length > 0 && lastProcessedMetaLength) {
+            sendProcessedFiles(self, contexts, toSend, handle, lastProcessedMetaLength);
+          }
+
+          return;
+        }
+
+        console.info(`Dicom file ${(typeof bufferOrFile === 'string' ? bufferOrFile : 'buffer')} found`);
+        lastProcessedMetaLength = metaLength;
+        const syntax = metaMessage.getValue(0x00020010);
+        const sopClassUID = metaMessage.getValue(0x00020002);
+        const instanceUID = metaMessage.getValue(0x00020003);
+
+        if (!contexts[sopClassUID]) {
+          contexts[sopClassUID] = [];
+        }
+
+        if (syntax && contexts[sopClassUID].indexOf(syntax) === -1) {
+          contexts[sopClassUID].push(syntax);
+        }
+
+        toSend.push({
+          file: bufferOrFile,
+          context: sopClassUID,
+          uid: instanceUID
+        });
+
+        if (read === length) {
+          sendProcessedFiles(self, contexts, toSend, handle, metaLength);
+        }
+      });
+    });
+
+    return handle;
+  }
+
+  storeResponse (messageId, msg) {
+    const rq = this.messages[messageId];
+
+    if (rq.listener[2]) {
+      const status = rq.listener[2].call(this, msg);
+
+      if (status !== undefined && status !== null && rq.command.store) {
+        // Store ok, ready to send c-store-rsp
+        const storeSr = rq.command.store;
+        const replyMessage = storeSr.replyWith(status);
+
+        replyMessage.setAffectedSOPInstanceUID(this.lastCommand.getSOPInstanceUID());
+        replyMessage.setReplyMessageId(this.lastCommand.messageId);
+        this.sendMessage(replyMessage, null, null, storeSr);
+      } else {
+        throw new Error('Missing store status');
+      }
+    }
+  }
+
+  allClosed () {
+    let allClosed = true;
+
+    for (const i in this.peers) {
+      if (Object.keys(this.peers[i].sockets).length > 0) {
+        allClosed = false;
+        break;
+      }
+    }
+
+    return allClosed;
+  }
+
+  addSocket (hostAE, socket) {
+    const peerInfo = this.selectPeer(hostAE);
+
+    peerInfo.sockets[socket.id] = socket;
+
+    socket.on('close', () => {
+      if (peerInfo.sockets[this.id]) {
+        delete peerInfo.sockets[this.id];
       }
     });
-  });
+  }
 
-  return handle;
+  associate (options, callback) {
+    const hostAE = options.hostAE ? options.hostAE : this.defaultPeer;
+    const sourceAE = options.sourceAE ? options.sourceAE : this.defaultServer;
+
+    if (!hostAE || !sourceAE) {
+      throw new Error('Peers not provided or no defaults in settings');
+    }
+
+    const peerInfo = this.selectPeer(hostAE);
+    const nativeSocket = new Socket();
+
+    const socket = new CSocket(nativeSocket, this.options);
+
+    if (callback) {
+      socket.once('associated', callback);
+    }
+
+    console.info('Starting Connection...');
+
+    socket.setCalledAe(hostAE);
+    socket.setCallingAE(sourceAE);
+
+    nativeSocket.connect({
+      host: peerInfo.host,
+      port: peerInfo.port
+    }, () => {
+      // Connected
+      this.addSocket(hostAE, socket);
+
+      if (options.contexts) {
+        socket.setPresentationContexts(options.contexts);
+      } else {
+        throw new Error('Contexts must be specified');
+      }
+
+      socket.associate();
+    });
+
+    return socket;
+  }
+}
+
+const StoreHandle = () => {
+  EventEmitter.call(this);
 };
 
 // Starts to send dcm files
-sendProcessedFiles = function (self, contexts, toSend, handle, metaLength) {
+const sendProcessedFiles = (connection, contexts, toSend, handle, metaLength) => {
   const useContexts = [];
 
   _.each(contexts, (useSyntaxes, context) => {
@@ -202,104 +289,22 @@ sendProcessedFiles = function (self, contexts, toSend, handle, metaLength) {
         syntaxes: useSyntaxes
       });
     } else {
-      throw `No syntax specified for context ${context}`;
+      throw new Error(`No syntax specified for context ${context}`);
     }
   });
 
-  self.associate({
+  connection.associate({
     contexts: useContexts
   }, function (ac) {
     const maxSend = ac.getMaxSize();
     const next = toSend.shift();
 
-    self._sendFile(this, handle, next, maxSend, metaLength, toSend);
+    connection._sendFile(this, handle, next, maxSend, metaLength, toSend);
 
   });
 };
 
-Connection.prototype.storeResponse = function (messageId, msg) {
-  const rq = this.messages[messageId];
+util.inherits(Connection, EventEmitter);
+util.inherits(StoreHandle, EventEmitter);
 
-  if (rq.listener[2]) {
-    const status = rq.listener[2].call(this, msg);
-
-    if (status !== undefined && status !== null && rq.command.store) {
-      // Store ok, ready to send c-store-rsp
-      const storeSr = rq.command.store;
-      const replyMessage = storeSr.replyWith(status);
-
-      replyMessage.setAffectedSOPInstanceUID(this.lastCommand.getSOPInstanceUID());
-      replyMessage.setReplyMessageId(this.lastCommand.messageId);
-      this.sendMessage(replyMessage, null, null, storeSr);
-    } else {
-      throw 'Missing store status';
-    }
-  }
-};
-
-Connection.prototype.allClosed = function () {
-  let allClosed = true;
-
-  for (const i in this.peers) {
-    if (Object.keys(peers[i].sockets).length > 0) {
-      allClosed = false;
-      break;
-    }
-  }
-
-  return allClosed;
-};
-
-Connection.prototype.addSocket = function (hostAE, socket) {
-  const peerInfo = this.selectPeer(hostAE);
-
-  peerInfo.sockets[socket.id] = socket;
-
-  socket.on('close', function () {
-    if (peerInfo.sockets[this.id]) {
-      delete peerInfo.sockets[this.id];
-    }
-  });
-};
-
-Connection.prototype.associate = function (options, callback) {
-  const self = this;
-  const hostAE = options.hostAE ? options.hostAE : this.defaultPeer;
-  const sourceAE = options.sourceAE ? options.sourceAE : this.defaultServer;
-
-  if (!hostAE || !sourceAE) {
-    throw 'Peers not provided or no defaults in settings';
-  }
-
-  const peerInfo = this.selectPeer(hostAE);
-  const nativeSocket = new Socket();
-
-  const socket = new CSocket(nativeSocket, this.options);
-
-  if (callback) {
-    socket.once('associated', callback);
-  }
-
-  OHIF.log.info('Starting Connection...');
-
-  socket.setCalledAe(hostAE);
-  socket.setCallingAE(sourceAE);
-
-  nativeSocket.connect({
-    host: peerInfo.host,
-    port: peerInfo.port
-  }, () => {
-    // Connected
-    this.addSocket(hostAE, socket);
-
-    if (options.contexts) {
-      socket.setPresentationContexts(options.contexts);
-    } else {
-      throw new Meteor.Error('Contexts must be specified');
-    }
-
-    socket.associate();
-  });
-
-  return socket;
-};
+export default Connection;
