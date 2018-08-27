@@ -32,7 +32,6 @@ module.exports = {
             "ignoreInlineComments": true
         }
     ],
-    'class-methods-use-this': 'warn',
     'comma-dangle': 'warn',
     'comma-spacing': [
       'warn',
@@ -191,7 +190,6 @@ module.exports = {
     'no-undef-init': 'warn',
     'no-undefined': 'off',
     'no-unused-vars': 'warn',
-    'no-underscore-dangle': 'warn',
     'no-unmodified-loop-condition': 'warn',
     'no-unneeded-ternary': 'warn',
     'no-unused-expressions': 'warn',

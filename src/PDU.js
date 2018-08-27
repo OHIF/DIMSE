@@ -3,7 +3,7 @@ PDVHandle = function () {
 };
 util.inherits(PDVHandle, EventEmitter);
 
-PDU = function () {
+const PDU = () => {
   this.fields = [];
   this.lengthBytes = 4;
 };
@@ -903,3 +903,4 @@ MaximumLengthItem.prototype.buffer = function () {
   return MaximumLengthItem.super_.prototype.buffer.call(this);
 };
 
+export default PDU;

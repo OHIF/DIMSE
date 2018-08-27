@@ -1,3 +1,5 @@
+import C from './constants.js';
+
 const dicomNDict = {
   0x00020000: { vr: 'UL',
     vm: C.VM_SINGLE,
@@ -10816,5 +10818,7 @@ const dicomVDict = {
     keyword: 'VariableCoefficientsSDDN' }
 };
 
-DicomElements = { dicomNDict,
-  dicomVDict };
+export {
+  dicomNDict,
+  dicomVDict
+};

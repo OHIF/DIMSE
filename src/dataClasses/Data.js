@@ -1,62 +1,24 @@
-function paddingLeft (paddingValue, string) {
-  return String(paddingValue + string).slice(-paddingValue.length);
-}
+import { dicomNDict } from '../elements_data.js';
+import constants from './../constants.js';
+import util from 'util';
+import { paddingLeft,
+  rtrim,
+  ltrim,
+  fieldsLength } from './dataUtil.js';
 
-function rtrim (str) {
-  return str.replace(/\s*$/g, '');
-}
+// Data classes
+import { default as Tag } from './tag.js';
 
-function ltrim (str) {
-  return str.replace(/^\s*/g, '');
-}
+const tagFromNumbers = (group, element) => new Tag(((group << 16) | element) >>> 0);
 
-function fieldsLength (fields) {
-  let length = 0;
-
-  fields.forEach(function (field) {
-    length += field.length();
-  });
-
-  return length;
-}
-
-Tag = function (value) {
-  this.value = value;
-};
-
-Tag.prototype.toString = function () {
-  return `(${paddingLeft('0000', this.group().toString(16))},${
-    paddingLeft('0000', this.element().toString(16))})`;
-};
-
-Tag.prototype.is = function (t) {
-  return this.value === t;
-};
-
-Tag.prototype.group = function () {
-  return this.value >>> 16;
-};
-
-Tag.prototype.element = function () {
-  return this.value & 0xffff;
-};
-
-Tag.prototype.isPixelDataTag = function () {
-  return this.is(0x7fe00010);
-};
-
-tagFromNumbers = function (group, element) {
-  return new Tag(((group << 16) | element) >>> 0);
-};
-
-function readTag (stream) {
-  let group = stream.read(C.TYPE_UINT16),
-    element = stream.read(C.TYPE_UINT16);
+const readTag = (stream) => {
+  const group = stream.read(constants.TYPE_UINT16);
+  const element = stream.read(constants.TYPE_UINT16);
 
   return tagFromNumbers(group, element);
-}
+};
 
-parseElements = function (stream, syntax) {
+const parseElements = (stream, syntax) => {
   const pairs = {};
 
   stream.reset();
@@ -71,7 +33,7 @@ parseElements = function (stream, syntax) {
   return pairs;
 };
 
-ValueRepresentation = function (type) {
+const ValueRepresentation = (type) => {
   this.type = type;
   this.multi = false;
 };
@@ -826,7 +788,7 @@ OtherByteString.prototype.getFields = function (value) {
 
 elementByType = function (type, value, syntax) {
   let elem = null,
-    nk = DicomElements.dicomNDict[type];
+    nk = dicomNDict[type];
 
   if (nk) {
     if (nk.vr === 'SQ') {
@@ -855,7 +817,7 @@ elementByType = function (type, value, syntax) {
 };
 
 elementDataByTag = function (tag) {
-  const nk = DicomElements.dicomNDict[tag];
+  const nk = dicomNDict[tag];
 
   if (nk) {
     return nk;

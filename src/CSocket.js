@@ -1,6 +1,4 @@
-import { OHIF } from 'meteor/ohif:core';
-
-const EventEmitter = Npm.require('events').EventEmitter;
+import { EventEmitter } from 'events';
 
 function time () {
   return Math.floor(Date.now() / 1000);
@@ -18,7 +16,7 @@ const Envelope = function (command, dataset) {
 
 util.inherits(Envelope, EventEmitter);
 
-CSocket = function (socket, options) {
+const CSocket = (socket, options) => {
   EventEmitter.call(this);
   this.socket = socket;
   this.negotiatedContexts = {};
@@ -700,3 +698,5 @@ CSocket.prototype.findInstances = function (params, options) {
 
   return this.find(sendParams, options);
 };
+
+export default CSocket;

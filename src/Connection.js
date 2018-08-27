@@ -1,19 +1,22 @@
 import _ from 'lodash';
 import net from 'net';
-import util from 'util';
 import { EventEmitter } from 'events';
-import { default as CSocket } from './CSocket.js';
-import { default as constant } from './constants.js';
-import { default as PDU } from './PDU.js';
-import { default as DicomMessage } from './Message.js';
+import CSocket from './CSocket.js';
+import C from './constants.js';
+import PDU from './PDU.js';
+import DicomMessage from './Message.js';
 
-const Socket = net.Socket;
+class StoreHandle extends EventEmitter {
+  super () {
+    EventEmitter.call(this);
+  }
+}
 
-class Connection {
-  constructor (options) {
+class Connection extends EventEmitter {
+  super (options) {
     EventEmitter.call(this);
     this.options = Object.assign({
-      maxPackageSize: constant.DEFAULT_MAX_PACKAGE_SIZE,
+      maxPackageSize: C.DEFAULT_MAX_PACKAGE_SIZE,
       idle: false,
       reconnect: true,
       vr: {
@@ -152,7 +155,7 @@ class Connection {
         if (err) {
           handle.emit('file', err, fileNameText);
           if (read === length && toSend.length > 0 && lastProcessedMetaLength) {
-            sendProcessedFiles(self, contexts, toSend, handle, lastProcessedMetaLength);
+            this._sendProcessedFiles(self, contexts, toSend, handle, lastProcessedMetaLength);
           }
 
           return;
@@ -179,7 +182,7 @@ class Connection {
         });
 
         if (read === length) {
-          sendProcessedFiles(self, contexts, toSend, handle, metaLength);
+          this._sendProcessedFiles(self, contexts, toSend, handle, metaLength);
         }
       });
     });
@@ -241,7 +244,7 @@ class Connection {
     }
 
     const peerInfo = this.selectPeer(hostAE);
-    const nativeSocket = new Socket();
+    const nativeSocket = new net.Socket();
 
     const socket = new CSocket(nativeSocket, this.options);
 
@@ -272,39 +275,31 @@ class Connection {
 
     return socket;
   }
+
+  // Starts to send dcm files
+  _sendProcessedFiles (connection, contexts, toSend, handle, metaLength) {
+    const useContexts = [];
+
+    _.each(contexts, (useSyntaxes, context) => {
+      if (useSyntaxes.length > 0) {
+        useContexts.push({
+          context,
+          syntaxes: useSyntaxes
+        });
+      } else {
+        throw new Error(`No syntax specified for context ${context}`);
+      }
+    });
+
+    connection.associate({
+      contexts: useContexts
+    }, (ac) => {
+      const maxSend = ac.getMaxSize();
+      const next = toSend.shift();
+
+      connection._sendFile(this, handle, next, maxSend, metaLength, toSend);
+    });
+  }
 }
-
-const StoreHandle = () => {
-  EventEmitter.call(this);
-};
-
-// Starts to send dcm files
-const sendProcessedFiles = (connection, contexts, toSend, handle, metaLength) => {
-  const useContexts = [];
-
-  _.each(contexts, (useSyntaxes, context) => {
-    if (useSyntaxes.length > 0) {
-      useContexts.push({
-        context,
-        syntaxes: useSyntaxes
-      });
-    } else {
-      throw new Error(`No syntax specified for context ${context}`);
-    }
-  });
-
-  connection.associate({
-    contexts: useContexts
-  }, function (ac) {
-    const maxSend = ac.getMaxSize();
-    const next = toSend.shift();
-
-    connection._sendFile(this, handle, next, maxSend, metaLength, toSend);
-
-  });
-};
-
-util.inherits(Connection, EventEmitter);
-util.inherits(StoreHandle, EventEmitter);
 
 export default Connection;
