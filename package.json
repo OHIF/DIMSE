@@ -6,7 +6,7 @@
     "DICOM",
     "DIMSE"
   ],
-  "author": "",
+  "author": "Open Health Imaging Foundation",
   "homepage": "https://github.com/OHIF/DIMSE",
   "license": "MIT",
   "main": "./dist/DIMSE.js",
